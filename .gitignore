@@ -1,0 +1,6 @@
+test
+.history
+*.jpg
+*.txt
+*.pt
+__pycache__
