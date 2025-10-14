@@ -5,17 +5,17 @@ from PIL import Image
 import pygame
 from screeninfo import get_monitors
 
-from model import create_resnet34
+from model import create_player
 
 # ---------- 設定 ----------
 side = 'b'
 main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-dataset_folder = f"{main_folder}/dataset/{side}"
+dataset_folder = f"{main_folder}/dataset(FULL_SCREEN)/{side}"
 best_model_path = f"{main_folder}/trained_models/{side}/best.pt"
 
 # ---------- 載入模型 ----------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = create_resnet34()
+model = create_player()
 model.load_state_dict(torch.load(best_model_path, map_location=device))
 model.to(device)
 model.eval()

@@ -1,38 +1,84 @@
+# 自定義資料集
 import os
+import random
+from PIL import Image
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
-from PIL import Image
-from model import create_resnet34
+from model import create_player
 
-# 自定義資料集
 class ImageRegressionDataset(Dataset):
     def __init__(self, folder_path, transform=None, augmentation=False, k=2):
         self.folder_path = folder_path
         self.transform = transform
-        self.image_files = [f for f in os.listdir(folder_path) if f.lower().endswith((".jpg", ".png"))]
         self.augmentation = augmentation
         self.k = k
 
+        self.image_files = [f for f in os.listdir(folder_path) if f.lower().endswith((".jpg", ".png"))]
+        
+        if self.augmentation:
+            self.image_aug_pairs = []
+            for f in self.image_files:
+                for i in range(k + 1):  # 原圖 + k 次增強
+                    self.image_aug_pairs.append((f, i))  # i=0 表示原圖，i>0 表示增強版本
+        else:
+            self.image_aug_pairs = [(f, 0) for f in self.image_files]
+
     def __len__(self):
-        return len(self.image_files)
+        return len(self.image_aug_pairs)
 
     def __getitem__(self, idx):
-        img_name = self.image_files[idx]
+        img_name, aug_idx = self.image_aug_pairs[idx]
         img_path = os.path.join(self.folder_path, img_name)
         label_path = os.path.splitext(img_path)[0] + ".txt"
 
         image = Image.open(img_path).convert("RGB")
+        W, H = image.size
+
+        # 讀取 label (x_norm, y_norm)
+        with open(label_path, 'r') as f:
+            line = f.read().strip().replace(",", " ")
+            x_norm, y_norm = map(float, line.split())
+            x_pix = x_norm * W
+            y_pix = y_norm * H
+
+        if aug_idx > 0 and self.augmentation:
+            image, (x_pix, y_pix) = self._augment_image(image, x_pix, y_pix)
+
+        # 轉換為正規化座標
+        x_norm_new = x_pix / W
+        y_norm_new = y_pix / H
+        label = torch.tensor([x_norm_new, y_norm_new], dtype=torch.float32)
+
         if self.transform:
             image = self.transform(image)
 
-        with open(label_path, 'r') as f:
-            line = f.read().strip().replace(",", " ")
-            label = torch.tensor([float(x) for x in line.split()], dtype=torch.float32)
-
         return image, label
+
+    def _augment_image(self, image, x, y):
+        while True:
+            W, H = image.size
+            scale = random.uniform(0.8, 1.2)
+            dx = random.uniform(-0.1, 0.1) * W
+            dy = random.uniform(-0.1, 0.1) * H
+
+            matrix = (
+                scale, 0, dx,
+                0, scale, dy
+            )
+
+            image_aug = image.transform((W, H), Image.AFFINE, matrix, resample=Image.BILINEAR)
+
+            # 調整點位
+            x_new = x / scale - dx
+            y_new = y / scale - dy
+
+            if abs(x_new / W - 0.5) < 0.5 or abs(y_new / H - 0.5) < 0.5: # 避免數值超出範圍
+                break
+
+        return image_aug, (x_new, y_new)
 
 # 圖像轉換
 transform = transforms.Compose([
@@ -41,9 +87,9 @@ transform = transforms.Compose([
 ])
 
 # 參數設定
-side = 'b'
+side = 'c'
 main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-dataset_folder = f'{main_folder}/dataset/{side}'
+dataset_folder = f'{main_folder}/dataset(FULL_SCREEN)/{side}'
 checkpoint_path = f"{main_folder}/trained_models/{side}/checkpoint.pt"
 best_model_path = f"{main_folder}/trained_models/{side}/best.pt"
 log_file = f"{main_folder}/trained_models/{side}/loss_log.txt"
@@ -53,16 +99,17 @@ num_epochs = 100
 save_interval = 10
 
 # 載入資料集並切分驗證集
-full_dataset = ImageRegressionDataset(dataset_folder, transform)
+full_dataset = ImageRegressionDataset(dataset_folder, transform, augmentation=False, k=2)
 val_size = int(0.2 * len(full_dataset))
 train_size = len(full_dataset) - val_size
 train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+print('資料集載入已完成')
 
 # 建立模型
-model = create_resnet34()
+model = create_player()
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 

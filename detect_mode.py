@@ -4,7 +4,7 @@ import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import model  # 你自定的 create_resnet18()
+from model import create_classifier
 
 # ========== 設定路徑 ==========
 main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
@@ -21,7 +21,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # resnet18.eval()
 
 # ========== 載入best模型 ==========
-resnet18 = model.create_resnet18().to(device)
+resnet18 = create_classifier().to(device)
 best = torch.load(model_path, map_location=device)
 resnet18.load_state_dict(best)
 resnet18.eval()

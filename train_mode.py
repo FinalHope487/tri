@@ -1,113 +1,155 @@
 import os
 import torch
-from torchvision import transforms
-from PIL import Image
-import pygame
+import torch.nn as nn
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
 
-from model import create_resnet34
+from model import create_classifier
 
-# ---------- 設定 ----------
-side = 'a'
+# ========== 1. 設定路徑 ==========
 main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-dataset_folder = f"{main_folder}/dataset/{side}"
-best_model_path = f"{main_folder}/trained_models/{side}/best.pt"
+dataset_folder = f"{main_folder}/screenshots"
+checkpoint_path = f"{main_folder}/trained_models/classifier/checkpoint.pt"
+best_model_path = f"{main_folder}/trained_models/classifier/best.pt"
+log_file = f"{main_folder}/trained_models/classifier/loss_log.txt"
+final_model_path = f"{main_folder}/trained_models/classifier/model_classifier.pt"
 
-# ---------- 載入模型 ----------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = create_resnet34()
-model.load_state_dict(torch.load(best_model_path, map_location=device))
-model.to(device)
-model.eval()
+os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-# ---------- 圖像處理 ----------
-transform = transforms.Compose([
+# ========== 2. 設定參數 ==========
+num_classes = 3
+batch_size = 32
+num_epochs = 50
+learning_rate = 1e-4
+device = torch.device("cuda")
+
+# ========== 3. 資料轉換 ==========
+train_transforms = transforms.Compose([
+    transforms.RandomHorizontalFlip(p=0.3),
+    transforms.RandomVerticalFlip(p=0.3),
+    transforms.RandomAffine(degrees=0, translate=(0.15, 0.15)),
+    transforms.RandomRotation(degrees=60),
+    transforms.RandomResizedCrop(size=224, scale=(0.8, 1.5)),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.ToTensor()
+])
+
+val_transforms = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-# ---------- 讀取所有圖片 ----------
-image_files = [f for f in os.listdir(dataset_folder) if f.lower().endswith((".jpg", ".png"))]
-image_files.sort()  # 若檔名有順序需求
+# ========== 4. 載入資料集並切割訓練 / 驗證 ==========
+full_dataset = datasets.ImageFolder(root=dataset_folder)
+train_len = int(0.8 * len(full_dataset))
+val_len = len(full_dataset) - train_len
+train_set, val_set = random_split(full_dataset, [train_len, val_len])
 
-results = []
+# train_set.dataset.transform = train_transforms
+# val_set.dataset.transform = val_transforms
 
-# ---------- 批次預測 ----------
-for img_file in image_files:
-    img_path = os.path.join(dataset_folder, img_file)
-    label_path = os.path.splitext(img_path)[0] + ".txt"
+train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
 
-    image = Image.open(img_path).convert("RGB")
-    input_tensor = transform(image).unsqueeze(0).to(device)
+# ========== 5. 模型與訓練設定 ==========
+model = create_classifier().to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+start_epoch = 0
+best_val_loss = float("inf")
+
+# 嘗試從 checkpoint 或 best.pt 恢復模型
+if os.path.exists(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint["model_state"])
+    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    start_epoch = checkpoint["epoch"] + 1
+    best_val_loss = checkpoint["best_val_loss"]
+    print(f"🔄 從 checkpoint 回復訓練，繼續從 epoch {start_epoch} 開始")
+    
+elif os.path.exists(best_model_path):
+    checkpoint = torch.load(best_model_path)
+    model.load_state_dict(checkpoint["model_state"])
+    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    best_val_loss = checkpoint["best_val_loss"]
+    print("📥 載入 best.pt 欲作為初始化訓練")
+
+# 初始化 log 檔案（如不存在）
+if not os.path.exists(log_file) or start_epoch == 0:
+    with open(log_file, "w") as f:
+        f.write("epoch,train_loss,train_acc,val_loss,val_acc\n")
+
+# ========== 6. 開始訓練 ==========
+print("📦 開始訓練 model...\n")
+
+for epoch in range(start_epoch, num_epochs):
+    model.train()
+    running_loss = 0.0
+    correct = 0
+
+    for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
+        inputs, labels = inputs.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * inputs.size(0)
+        preds = torch.argmax(outputs, dim=1)
+        correct += (preds == labels).sum().item()
+
+    train_loss = running_loss / len(train_set)
+    train_acc = correct / len(train_set)
+
+    # ========== 驗證階段 ==========
+    model.eval()
+    val_loss = 0.0
+    val_correct = 0
 
     with torch.no_grad():
-        output = model(input_tensor).squeeze().cpu()  # tensor([x, y])
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
 
-    pred_x, pred_y = output.tolist()
+            val_loss += loss.item() * inputs.size(0)
+            preds = torch.argmax(outputs, dim=1)
+            val_correct += (preds == labels).sum().item()
 
-    # Ground truth
-    if os.path.exists(label_path):
-        with open(label_path, 'r') as f:
-            gt = [float(x) for x in f.read().strip().replace(",", " ").split()]
-            gt_x, gt_y = gt
-    else:
-        gt_x, gt_y = None, None
+    val_loss = val_loss / len(val_set)
+    val_acc = val_correct / len(val_set)
 
-    results.append({
-        "filename": img_file,
-        "image": image,
-        "pred": (pred_x, pred_y),
-        "gt": (gt_x, gt_y)
-    })
+    # ========== 顯示當前結果 ==========
+    print(f"📊 Epoch {epoch+1}: Train Loss={train_loss:.4f}, Acc={train_acc:.4f} | Val Loss={val_loss:.4f}, Acc={val_acc:.4f}")
 
-# ---------- 初始化 Pygame ----------
-pygame.init()
-display_size = (448, 448)
-screen = pygame.display.set_mode(display_size)
-pygame.display.set_caption("🔍 模型推論結果（← / → 切換）")
-font = pygame.font.SysFont(None, 24)
+    # ========== 儲存 log ==========
+    with open(log_file, "a") as f:
+        f.write(f"{epoch+1},{train_loss:.4f},{train_acc:.4f},{val_loss:.4f},{val_acc:.4f}\n")
 
-# ---------- 顯示邏輯 ----------
-index = 0
-running = True
+    # ========== 儲存最佳模型 ==========
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save({
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "best_val_loss": best_val_loss
+        }, best_model_path)
+        print(f"💾 已儲存最佳模型 → best.pt (val_loss={best_val_loss:.4f})")
 
-def draw_result(result):
-    screen.fill((0, 0, 0))
-    image_resized = result["image"].resize(display_size)
-    img_data = pygame.image.fromstring(image_resized.tobytes(), image_resized.size, image_resized.mode)
-    screen.blit(img_data, (0, 0))
+    # ========== 儲存 Checkpoint ==========
+    if (epoch + 1) % 10 == 0:
+        torch.save({
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "best_val_loss": best_val_loss
+        }, checkpoint_path)
+        print(f"🕹️ Checkpoint 儲存：{checkpoint_path}")
 
-    # 畫預測點（紅）
-    px = int(result["pred"][0] * display_size[0])
-    py = int(result["pred"][1] * display_size[1])
-    pygame.draw.circle(screen, (255, 0, 0), (px, py), 5)
-
-    # 畫真實點（綠）
-    if result["gt"][0] is not None:
-        gx = int(result["gt"][0] * display_size[0])
-        gy = int(result["gt"][1] * display_size[1])
-        pygame.draw.circle(screen, (0, 255, 0), (gx, gy), 5)
-
-    # 顯示圖片名稱
-    label_surface = font.render(result["filename"], True, (255, 255, 255))
-    screen.blit(label_surface, (10, 10))
-
-    pygame.display.flip()
-
-# ---------- 主迴圈 ----------
-draw_result(results[index])
-
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RIGHT:
-                index = (index + 1) % len(results)
-                draw_result(results[index])
-            elif event.key == pygame.K_LEFT:
-                index = (index - 1) % len(results)
-                draw_result(results[index])
-
-pygame.quit()
-
+# ========== 7. 儲存最終模型 ==========
+torch.save(model.state_dict(), final_model_path)
+print(f"\n✅ 最終模型儲存至：{final_model_path}")

@@ -1,4 +1,5 @@
 import time
+import os
 import random
 import multiprocessing as  mp
 import torch
@@ -10,6 +11,7 @@ import cv2
 import pydirectinput as pyd
 from screeninfo import get_monitors
 import keyboard
+from PIL import ImageDraw
 
 from model import create_player, create_classifier
 
@@ -17,16 +19,18 @@ from model import create_player, create_classifier
 # cos: c->a
 # tan: a->b
 
-MODE = ''
+MODE = 'tan'
 sides_dict = {'cos': ('c', 'a'), 'sin': ('c', 'b'), 'tan': ('a', 'b')}
 modes_list = ['cos', 'sin', 'tan']
 
 main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-mode_model_path = f'{main_folder}/trained_models/classifier/best.pt'
-pos_models_path = {side: f'{main_folder}/trained_models/{side}/best.pt' for side in ['a', 'b', 'c']}
+mode_model_path = f'{main_folder}/trained_models_aug/classifier/best.pt'
+pos_models_path = {side: f'{main_folder}/trained_models_aug/{side}/best.pt' for side in ['a', 'b', 'c']}
 monitor_number = 0
+SAVE_DIR = os.path.join(main_folder, 'saved_images')
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# prev_poses = [(0, 0), (1, 1)]
+prev_poses = [(0, 0), (0, 0)]
 
 # ---------- 載入模型 ----------
 device = torch.device("cuda")
@@ -51,14 +55,20 @@ transform = transforms.Compose([
 ])
 
 def screenshot():
+    # prev_sct_img = None
     with mss.mss() as sct:
         monitor = sct.monitors[monitor_number + 1]
+        # while True:
+        #     sct_img = sct.grab(monitor)
+        #     if prev_sct_img is None or prev_sct_img.bgra != sct_img.bgra:
+        #         prev_sct_img = sct_img
+        #         break
         sct_img = sct.grab(monitor)
 
         # 轉換為 PIL 圖像
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
         resized_img = img.resize((224, 126), cv2.INTER_LINEAR)
-
+            
         height, width = resized_img.size
         size = max(height, width)
 
@@ -84,18 +94,18 @@ def detect_pos(model, img):
 
     return tuple(output.tolist())
 
-def action(pos1, pos2, pause=False):
+def action(pos1, pos2, add_offset=False, pause=False):
     m = get_monitors()[monitor_number]
-    # pyd.moveTo(int((pos1[0] + random.uniform(-0.05, 0.05) * add_offset) * m.width + m.x), int((pos1[1] + random.uniform(-0.05, 0.05) * add_offset) * m.height + m.y), _pause=False)
+    # pyd.moveTo(int(pos1[0] * m.width + m.x), int(pos1[1] * m.height + m.y), _pause=False)
     # pyd.mouseDown(_pause=False)
-    # pyd.moveTo(int((pos2[0] + random.uniform(-0.05, 0.05) * add_offset) * m.width + m.x), int((pos2[1] + random.uniform(-0.05, 0.05) * add_offset) * m.height + m.y), _pause=False)
-    # pyd.mouseUp(_pause=False)
-    pyd.moveTo(int(pos1[0] * m.width + m.x), int(pos1[1] * m.height + m.y), _pause=False)
+    # pyd.moveTo(int(pos2[0] * m.width + m.x), int(pos2[1] * m.height + m.y), _pause=False)
+    # pyd.mouseUp(_pause=pause)
+    pyd.moveTo(int((pos1[0] + random.uniform(-0.1, 0.1) * add_offset) * m.width + m.x), int((pos1[1] + random.uniform(-0.1, 0.1) * add_offset) * m.height + m.y), _pause=False)
     pyd.mouseDown(_pause=False)
-    pyd.moveTo(int(pos2[0] * m.width + m.x), int(pos2[1] * m.height + m.y), _pause=False)
-    pyd.mouseUp(_pause=pause)
+    pyd.moveTo(int((pos2[0] + random.uniform(-0.1, 0.1) * add_offset) * m.width + m.x), int((pos2[1] + random.uniform(-0.1, 0.1) * add_offset) * m.height + m.y), _pause=False)
+    pyd.mouseUp(_pause=False)
 
-def detect_and_action():
+def detect_and_action(img_save_queue):
     poses = []
     img = screenshot()
     if not MODE:
@@ -108,16 +118,39 @@ def detect_and_action():
     for side in sides_dict[mode]:
         poses.append(detect_pos(pos_models_dict[side], img))
 
-    # if round(prev_poses[0][0] - poses[0][0], 6) == 0 and round(prev_poses[1][1] - poses[1][1], 6) == 0:
-    #     action(poses[0], poses[1], add_offset=True)
-    # else:
-    #     action(poses[0], poses[1])
+    if round((prev_poses[0][0] - poses[0][0]) * 2, 3) == 0 and round((prev_poses[0][1] - poses[0][1]) * 2, 3) == 0 and \
+        round((prev_poses[1][0] - poses[1][0]) * 2, 3) == 0 and round((prev_poses[1][1] - poses[1][1]) * 2, 3) == 0:
+        action(poses[0], poses[1], add_offset=True)
+    else:
+        action(poses[0], poses[1])
 
-    # prev_poses[0], prev_poses[1] = poses[0], poses[1]
+    prev_poses[0], prev_poses[1] = poses[0], poses[1]
 
-    # print('mode:', mode if not MODE else MODE, 'pos:', poses)
+    print('mode:', mode if not MODE else MODE, 'pos:', poses)
 
-    action(poses[0], poses[1], pause=True)
+    # action(pos1, pos2)
+    
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    # img_save_queue.put((img.copy(), pos1, pos2, timestamp))
+
+def save_image_worker(queue):
+    while True:
+        img, pos1, pos2, timestamp = queue.get()
+
+        # 畫座標點
+        draw = ImageDraw.Draw(img)
+        size = img.size[0]
+
+        # pos1: 綠色 (start)
+        x1, y1 = int(pos1[0] * size), int(pos1[1] * size)
+        draw.ellipse((x1-5, y1-5, x1+5, y1+5), fill=(0, 255, 0))
+
+        # pos2: 藍色 (end)
+        x2, y2 = int(pos2[0] * size), int(pos2[1] * size)
+        draw.ellipse((x2-5, y2-5, x2+5, y2+5), fill=(0, 0, 255))
+
+        filename = f"{timestamp}.png"
+        img.save(os.path.join(SAVE_DIR, filename))
 
 def toggle_loop(running):
     was_pressed = False
@@ -132,9 +165,13 @@ def toggle_loop(running):
         time.sleep(1/60)
 
 if __name__ == '__main__':
-    # 初始狀態
     running = mp.Value('b', False)
     mp.Process(target=toggle_loop, args=(running,), daemon=True).start()
+
+    # 建立儲存 queue 與儲存處理器
+    manager = mp.Manager()
+    img_save_queue = manager.Queue()
+    # mp.Process(target=save_image_worker, args=(img_save_queue,), daemon=True).start()
 
     if MODE:
         print('current mode:', MODE)
@@ -143,7 +180,7 @@ if __name__ == '__main__':
 
     while True:
         if running.value:
-            detect_and_action()
-            # time.sleep(1/60)
+            detect_and_action(img_save_queue)
+            time.sleep(1/25)
         else:
             time.sleep(1/60)
