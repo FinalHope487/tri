@@ -1,7 +1,5 @@
 test
 .history
-*.jpg
-*.txt
 *.pt
 __pycache__
 saved_images/
