@@ -7,32 +7,28 @@ from screeninfo import get_monitors
 
 from model import create_player
 
-# ---------- 設定 ----------
-side = 'b'
-main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-dataset_folder = f"{main_folder}/dataset(FULL_SCREEN)/{side}"
-best_model_path = f"{main_folder}/trained_models/{side}/best.pt"
+from config import DATASET_FULLSCREEN_FOLDER, get_best_model_path
 
-# ---------- 載入模型 ----------
+side = 'b'
+dataset_folder = DATASET_FULLSCREEN_FOLDER / side
+best_model_path = get_best_model_path(side)
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = create_player()
 model.load_state_dict(torch.load(best_model_path, map_location=device))
 model.to(device)
 model.eval()
 
-# ---------- 圖像處理 ----------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-# ---------- 讀取所有圖片 ----------
 image_files = [f for f in os.listdir(dataset_folder) if f.lower().endswith((".jpg", ".png"))]
 image_files.sort()  # 若檔名有順序需求
 
 results = []
 
-# ---------- 批次預測 ----------
 for img_file in image_files:
     img_path = os.path.join(dataset_folder, img_file)
     label_path = os.path.splitext(img_path)[0] + ".txt"
@@ -60,14 +56,12 @@ for img_file in image_files:
         "gt": (gt_x, gt_y)
     })
 
-# ---------- 初始化 Pygame ----------
 pygame.init()
 display_size = (448, 448)
 screen = pygame.display.set_mode(display_size)
-pygame.display.set_caption("🔍 模型推論結果（← / → 切換）")
+pygame.display.set_caption("模型推論結果（← / → 切換）")
 font = pygame.font.SysFont(None, 24)
 
-# ---------- 顯示邏輯 ----------
 index = 0
 running = True
 
@@ -94,7 +88,6 @@ def draw_result(result):
 
     pygame.display.flip()
 
-# ---------- 主迴圈 ----------
 draw_result(results[index])
 
 while running:

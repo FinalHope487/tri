@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 from screeninfo import get_monitors
 
-# ---------- 全域變數 ----------
 task_queue = Queue()
 result_queue = Queue()
 pos_queue = Queue()
@@ -25,7 +24,8 @@ image_display_running = True  # 控制顯示視窗的 thread 是否繼續運作
 
 m = get_monitors()[monitor_number]
 
-# ---------- 子程序：擷取螢幕截圖 ----------
+from config import SCREENSHOTS_FOLDER
+
 def screenshot_worker(task_queue, result_queue, worker_id):
     with mss.mss() as sct:
         with mss_lock:
@@ -55,12 +55,11 @@ def screenshot_worker(task_queue, result_queue, worker_id):
                     print(f"[Worker {worker_id}] 結束")
                     break
 
-# ---------- 滑鼠監聽 ----------
 def mouse_listener():
     def on_click(x, y, button, pressed):
         global was_pressed, press_pos, release_pos
         if pressed and not was_pressed:
-            print("📸 收到截圖請求...")
+            print("收到截圖請求...")
             print(f"Pressed at ({x}, {y})")
             press_pos = (x, y)
             was_pressed = True
@@ -75,22 +74,21 @@ def mouse_listener():
     with Listener(on_click=on_click) as listener:
         listener.join()
 
-# ---------- 顯示圖片視窗的背景 Thread ----------
 def image_display_loop():
     global latest_image, image_display_running
     while image_display_running:
         if latest_image is not None:
-            cv2.imshow("🖼️ Latest Screenshot", latest_image)
+            cv2.imshow("Latest Screenshot", latest_image)
         key = cv2.waitKey(100)
         if key == 27:  # 按下 ESC 也可結束（選擇性）
             image_display_running = False
             break
     cv2.destroyAllWindows()
 
-# ---------- 主程式 ----------
 if __name__ == '__main__':
-    screenshot_folder = str(Path(__file__).parent /'screenshots'/(str(time.strftime("%Y-%m-%d %H-%M-%S", time.localtime()))))
-    os.makedirs(screenshot_folder, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime())
+    screenshot_folder = SCREENSHOTS_FOLDER / timestamp
+    screenshot_folder.mkdir(parents=True, exist_ok=True)
 
     num_workers = 3
     workers = []
@@ -100,9 +98,8 @@ if __name__ == '__main__':
         workers.append(p)
 
     time.sleep(0.2)
-    print("📸 按下滑鼠左鍵以截圖 (Ctrl+C 中止)")
+    print("按下滑鼠左鍵以截圖 (Ctrl+C 中止)")
 
-    # 啟動滑鼠監聽 & 顯示圖像的背景 Thread
     t = Thread(target=mouse_listener, daemon=True)
     t.start()
 
@@ -116,15 +113,12 @@ if __name__ == '__main__':
                 worker_id, img = result_queue.get()
                 pos_dict = pos_queue.get()
 
-                print(f"✅ 來自 Worker {worker_id} 的圖像，大小：{img.shape}")
+                print(f"來自 Worker {worker_id} 的圖像，大小：{img.shape}")
 
-                # 儲存圖片
                 Image.fromarray(img).save(f'{screenshot_folder}/img{i}.jpg')
 
-                # 更新最新圖片供顯示
                 latest_image = img.copy()
 
-                # 儲存座標資訊
                 with open(f'{screenshot_folder}/img{i}.txt', 'w') as f:
                     f.write(f"{(pos_dict['press_pos'][0] - m.x) / m.width:.5f}, {(pos_dict['press_pos'][1] - m.y) / m.height:.5f}\n")
                     f.write(f"{(pos_dict['release_pos'][0] - m.x) / m.width:.5f}, {(pos_dict['release_pos'][1] - m.y) / m.height:.5f}\n")
@@ -132,14 +126,12 @@ if __name__ == '__main__':
                 i += 1
 
     except KeyboardInterrupt:
-        print("🛑 程式終止中...")
+        print("程式終止中...")
 
-        # 結束所有 worker
         for _ in workers:
             task_queue.put("exit")
         for p in workers:
             p.join()
 
-        # 結束圖像顯示 thread
         image_display_running = False
         # display_thread.join()

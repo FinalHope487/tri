@@ -1,4 +1,3 @@
-# 自定義資料集
 import os
 import random
 from PIL import Image
@@ -80,101 +79,99 @@ class ImageRegressionDataset(Dataset):
 
         return image_aug, (x_new, y_new)
 
-# 圖像轉換
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-# 參數設定
-side = 'c'
-main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-dataset_folder = f'{main_folder}/dataset(FULL_SCREEN)/{side}'
-checkpoint_path = f"{main_folder}/trained_models/{side}/checkpoint.pt"
-best_model_path = f"{main_folder}/trained_models/{side}/best.pt"
-log_file = f"{main_folder}/trained_models/{side}/loss_log.txt"
-batch_size = 8
-learning_rate = 1e-4
-num_epochs = 100
-save_interval = 10
+def main():
+    for side in ['a', 'b', 'c']:
+        from config import DATASET_FOLDER, get_checkpoint_path, get_best_model_path, get_log_file_path
+        print(f"Training {side} side model ...")
+        # side = 'c'
+        dataset_folder = str(DATASET_FOLDER / side)
+        checkpoint_path = str(get_checkpoint_path(side))
+        best_model_path = str(get_best_model_path(side))
+        log_file = str(get_log_file_path(side))
+        batch_size = 8
+        learning_rate = 1e-4
+        num_epochs = 200
+        save_interval = 10
 
-# 載入資料集並切分驗證集
-full_dataset = ImageRegressionDataset(dataset_folder, transform, augmentation=False, k=2)
-val_size = int(0.2 * len(full_dataset))
-train_size = len(full_dataset) - val_size
-train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        full_dataset = ImageRegressionDataset(dataset_folder, transform, augmentation=False, k=2)
+        val_size = int(0.2 * len(full_dataset))
+        train_size = len(full_dataset) - val_size
+        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-print('資料集載入已完成')
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        print('資料集載入已完成')
 
-# 建立模型
-model = create_player()
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        model = create_player()
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-# 使用 GPU
-device = torch.device("cuda")
-model.to(device)
+        device = torch.device("cuda")
+        model.to(device)
 
-# 檢查是否有存檔可以續訓
-start_epoch = 0
-best_val_loss = float('inf')
-if os.path.exists(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint["model_state"])
-    optimizer.load_state_dict(checkpoint["optimizer_state"])
-    start_epoch = checkpoint["epoch"] + 1
-    best_val_loss = checkpoint["best_val_loss"]
-    print(f"✅ 已載入 checkpoint（從 epoch {start_epoch} 繼續）")
+        start_epoch = 0
+        best_val_loss = float('inf')
+        if os.path.exists(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path)
+            model.load_state_dict(checkpoint["model_state"])
+            optimizer.load_state_dict(checkpoint["optimizer_state"])
+            start_epoch = checkpoint["epoch"] + 1
+            best_val_loss = checkpoint["best_val_loss"]
+            print(f"已載入 checkpoint（從 epoch {start_epoch} 繼續）")
 
-# 開始訓練
-for epoch in range(start_epoch, num_epochs):
-    model.train()
-    total_train_loss = 0.0
-    for images, labels in train_loader:
-        images = images.to(device)
-        labels = labels.to(device)
+        for epoch in range(start_epoch, num_epochs):
+            model.train()
+            total_train_loss = 0.0
+            for images, labels in train_loader:
+                images = images.to(device)
+                labels = labels.to(device)
 
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        total_train_loss += loss.item()
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                total_train_loss += loss.item()
 
-    avg_train_loss = total_train_loss / len(train_loader)
+            avg_train_loss = total_train_loss / len(train_loader)
 
-    # 驗證階段
-    model.eval()
-    total_val_loss = 0.0
-    with torch.no_grad():
-        for images, labels in val_loader:
-            images = images.to(device)
-            labels = labels.to(device)
-            outputs = model(images)
-            val_loss = criterion(outputs, labels)
-            total_val_loss += val_loss.item()
-    avg_val_loss = total_val_loss / len(val_loader)
+            model.eval()
+            total_val_loss = 0.0
+            with torch.no_grad():
+                for images, labels in val_loader:
+                    images = images.to(device)
+                    labels = labels.to(device)
+                    outputs = model(images)
+                    val_loss = criterion(outputs, labels)
+                    total_val_loss += val_loss.item()
+            avg_val_loss = total_val_loss / len(val_loader)
 
-    print(f"[Epoch {epoch+1}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+            print(f"[Epoch {epoch+1}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-    # 儲存 log
-    with open(log_file, "a") as f:
-        f.write(f"{epoch+1},{avg_train_loss:.6f},{avg_val_loss:.6f}\n")
+            with open(log_file, "a") as f:
+                f.write(f"{epoch+1},{avg_train_loss:.6f},{avg_val_loss:.6f}\n")
 
-    # 儲存最佳模型
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), best_model_path)
-        print(f"💾 儲存最佳模型至 {best_model_path}（val loss: {best_val_loss:.6f}）")
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                torch.save(model.state_dict(), best_model_path)
+                print(f"儲存最佳模型至 {best_model_path}（val loss: {best_val_loss:.6f}）")
 
-    # 每 N epoch 儲存 checkpoint
-    if (epoch + 1) % save_interval == 0:
-        torch.save({
-            "epoch": epoch,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "best_val_loss": best_val_loss
-        }, checkpoint_path)
-        print(f"📦 Checkpoint 儲存於 {checkpoint_path}")
+            if (epoch + 1) % save_interval == 0:
+                torch.save({
+                    "epoch": epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "best_val_loss": best_val_loss
+                }, checkpoint_path)
+                print(f"Checkpoint 儲存於 {checkpoint_path}")
+            
+        print(f"Training {side} side model completed")
+        print("=====================================")
+
+if __name__ == "__main__":
+    main()

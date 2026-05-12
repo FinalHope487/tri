@@ -19,23 +19,24 @@ from model import create_player, create_classifier
 # cos: c->a
 # tan: a->b
 
+from config import MAIN_FOLDER, get_best_model_path
+
 MODE = 'tan'
 sides_dict = {'cos': ('c', 'a'), 'sin': ('c', 'b'), 'tan': ('a', 'b')}
 modes_list = ['cos', 'sin', 'tan']
 
-main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-mode_model_path = f'{main_folder}/trained_models_aug/classifier/best.pt'
-pos_models_path = {side: f'{main_folder}/trained_models_aug/{side}/best.pt' for side in ['a', 'b', 'c']}
+mode_model_path = get_best_model_path('classifier')
+pos_models_path = {side: get_best_model_path(side) for side in ['a', 'b', 'c']}
 monitor_number = 0
-SAVE_DIR = os.path.join(main_folder, 'saved_images')
-os.makedirs(SAVE_DIR, exist_ok=True)
+SAVE_DIR = MAIN_FOLDER / 'saved_images'
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 prev_poses = [(0, 0), (0, 0)]
 
-# ---------- 載入模型 ----------
 device = torch.device("cuda")
 
 mode_model = create_classifier()
+print(torch.load(mode_model_path, map_location=device))
 mode_model.load_state_dict(torch.load(mode_model_path, map_location=device))
 mode_model.to(device)
 mode_model.eval()
@@ -48,7 +49,6 @@ for side in ['a', 'b', 'c']:
     model.eval()
     pos_models_dict[side] = model
 
-# ---------- 圖像處理 ----------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
@@ -137,7 +137,6 @@ def save_image_worker(queue):
     while True:
         img, pos1, pos2, timestamp = queue.get()
 
-        # 畫座標點
         draw = ImageDraw.Draw(img)
         size = img.size[0]
 
@@ -168,7 +167,6 @@ if __name__ == '__main__':
     running = mp.Value('b', False)
     mp.Process(target=toggle_loop, args=(running,), daemon=True).start()
 
-    # 建立儲存 queue 與儲存處理器
     manager = mp.Manager()
     img_save_queue = manager.Queue()
     # mp.Process(target=save_image_worker, args=(img_save_queue,), daemon=True).start()

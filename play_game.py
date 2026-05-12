@@ -17,22 +17,23 @@ from model import create_player, create_classifier
 # cos: c->a
 # tan: a->b
 
+from config import get_best_model_path
+
 MODE = ''
 sides_dict = {'cos': ('c', 'a'), 'sin': ('c', 'b'), 'tan': ('a', 'b')}
 modes_list = ['cos', 'sin', 'tan']
 
-main_folder = r"C:\Users\sword\.vscode\vtb\my-projects\tri"
-mode_model_path = f'{main_folder}/trained_models/classifier/best.pt'
-pos_models_path = {side: f'{main_folder}/trained_models/{side}/best.pt' for side in ['a', 'b', 'c']}
+mode_model_path = get_best_model_path('classifier')
+pos_models_path = {side: get_best_model_path(side) for side in ['a', 'b', 'c']}
 monitor_number = 0
 
 # prev_poses = [(0, 0), (1, 1)]
 
-# ---------- 載入模型 ----------
 device = torch.device("cuda")
 
 mode_model = create_classifier()
-mode_model.load_state_dict(torch.load(mode_model_path, map_location=device))
+# print(torch.load(mode_model_path, map_location=device))
+mode_model.load_state_dict(torch.load(mode_model_path, map_location=device)["model_state"])
 mode_model.to(device)
 mode_model.eval()
 
@@ -44,7 +45,6 @@ for side in ['a', 'b', 'c']:
     model.eval()
     pos_models_dict[side] = model
 
-# ---------- 圖像處理 ----------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
@@ -132,7 +132,6 @@ def toggle_loop(running):
         time.sleep(1/60)
 
 if __name__ == '__main__':
-    # 初始狀態
     running = mp.Value('b', False)
     mp.Process(target=toggle_loop, args=(running,), daemon=True).start()
 

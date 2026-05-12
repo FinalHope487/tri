@@ -3,3 +3,4 @@ test
 *.pt
 __pycache__
 saved_images/
+loss_log*
